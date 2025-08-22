@@ -1,0 +1,217 @@
+const toastMessage = $("#liveToast .toast-body p");
+const studentId = $("body").data("student-id");
+const studentName = $("body").data("student-name");
+
+$(document).ready(function () {
+	displayAcademicCalendar();
+	displaySchedule();
+	printSchedule();
+});
+
+function displayAcademicCalendar() {
+	var calendarEl = document.getElementById("calendar");
+
+	var calendar = new FullCalendar.Calendar(calendarEl, {
+		events: function (info, successCallback, failureCallback) {
+			$.ajax({
+				url: "../phpscripts/fetch-calendar-data.php",
+				dataType: "json",
+				success: function (response) {
+					if (response.status === "success") {
+						var events = response.holidays.map(function (event) {
+							return {
+								title: event.event_name,
+								start: event.event_date,
+								allDay: event.is_holiday === "true",
+							};
+						});
+						successCallback(events);
+					} else {
+						console.error(response.message);
+						failureCallback("Error fetching holidays");
+					}
+				},
+				error: function (xhr, status, error) {
+					console.error(error);
+					failureCallback("Failed to fetch holidays.");
+				},
+			});
+		},
+		eventColor: "#e72489",
+		headerToolbar: {
+			left: "prev,next today",
+			center: "title",
+			right: "dayGridMonth,dayGridWeek,dayGridDay",
+		},
+		editable: false,
+		droppable: false,
+		eventContent: function (arg) {
+			return {
+				html: `<div class="fc-event-title fc-no-dot">${arg.event.title}</div>`,
+			};
+		},
+	});
+
+	calendar.render();
+}
+
+function displaySchedule() {
+	var student_number = $(".student-pg").data("student-id");
+
+	$.ajax({
+		url: "../phpscripts/std/fetch-student-schedule.php",
+		method: "GET",
+		data: { student_number },
+		dataType: "json",
+		success: function (response) {
+			if (response.status === "success") {
+				var scheduleTable = $("#tblSchedule tbody");
+				scheduleTable.empty(); // Clear existing rows
+
+				response.schedules.forEach(function (schedule) {
+					var startTime = formatTime(schedule.start_time);
+					var endTime = formatTime(schedule.end_time);
+					var timeRange = `${startTime} - ${endTime}`;
+
+					var row = `
+                        <tr>
+                            <td>${schedule.subject_code}</td>
+                            <td>${schedule.subject_name}</td>
+                            <td>${schedule.day_of_week}</td>
+                            <td>${timeRange}</td>
+                            <td>${schedule.instructor_name || "N/A"}</td>
+                        </tr>
+                    `;
+					scheduleTable.append(row);
+				});
+			} else {
+				console.error(response.message);
+			}
+		},
+		error: function (xhr, status, error) {
+			console.error("Failed to fetch schedule:", error);
+		},
+	});
+}
+
+function printSchedule() {
+	$(document).on("click", ".print-schedule", function () {
+		var scheduleTable = $("#tblSchedule");
+		var printWindow = window.open("", "", "height=600,width=800");
+
+		var printContent = `
+            <html>
+            <head>
+                <style>
+                    @media print {
+                        @page {
+                            margin: 20px;
+                        }
+                        body {
+                            margin: 0;
+                        }
+                        .no-print {
+                            display: none;
+                        }
+                    }
+					* {
+						font-family: 'Times New Roman', serif;
+                        font-size: 14px;
+					}
+                    body {
+                        margin: 20px;
+                    }
+                    table {
+                        width: 100%;
+                        border-collapse: collapse;
+                        margin-top: 20px;
+                    }
+                    th, td {
+                        border: 1px solid #000;
+                        padding: 10px;
+                        text-align: center;
+                    }
+                    th {
+                        background-color: #f2f2f2;
+                    }
+                    h2 {
+                        text-align: center;
+                    }
+                    h3 {
+                        text-align: center;
+                        margin-top: 40px;
+                    }
+                    .logo {
+                        text-align: center;
+                    }
+                    .user-details {
+                        margin: 20px 0;
+                    }
+                    .row {
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="logo">
+                    <img src="../assets/images/logo1.png" height="120" width="120">
+                </div>
+                <div class="user-details">
+                    <div class="row">
+                        <div class="col">
+                            <p>Generated by: ${studentName}</p>
+                        </div>
+                        <div class="col">
+                            <p>Date Printed: ${new Date().toLocaleString()}</p>
+                        </div>
+                    </div>
+                </div>
+                <div style="font-family: Arial, sans-serif; text-align: center;">
+                    <h3>Class Schedule</h3>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Subject Code</th>
+                                <th>Subject Description</th>
+                                <th>Days of Week</th>
+                                <th>Time</th>
+                                <th>Professor</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${scheduleTable.find("tbody").html()}
+                        </tbody>
+                    </table>
+                    <button class="no-print" onclick="window.print()">Print this page</button>
+                </div>
+            </body>
+            </html>
+        `;
+
+		printWindow.document.write(printContent);
+		printWindow.document.close();
+		printWindow.print();
+	});
+}
+
+function formatTime(timeString) {
+	// Ensure the time string is valid and in the correct format
+	if (!timeString || !timeString.includes(":")) {
+		console.error("Invalid time format:", timeString);
+		return "Invalid Time"; // Return a placeholder in case of invalid input
+	}
+
+	var [hours, minutes] = timeString.split(":").map(Number); // Split and convert to numbers
+	if (isNaN(hours) || isNaN(minutes)) {
+		console.error("Invalid time components:", hours, minutes);
+		return "Invalid Time"; // Handle invalid numeric conversions
+	}
+
+	var period = hours >= 12 ? "PM" : "AM";
+	var formattedHours = hours % 12 || 12; // Convert 24-hour time to 12-hour time
+	var formattedMinutes = minutes.toString().padStart(2, "0");
+
+	return `${formattedHours}:${formattedMinutes} ${period}`;
+}
